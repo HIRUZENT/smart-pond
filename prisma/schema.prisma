@@ -1,0 +1,471 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+// =============================================
+// ENUM
+// =============================================
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  OPERATOR
+}
+
+enum PondType {
+  PARIT_SEKAT
+  TABUNG
+}
+
+enum WaterParameter {
+  PH
+  TEMPERATURE
+  TDS
+  DO
+}
+
+enum AlertTrigger {
+  WATER_QUALITY
+  SCHEDULE
+}
+
+enum ActivityType {
+  FEEDING
+  WATER_CHANGE
+  WATER_ADDITION
+  AERATOR
+  CLEANING
+  FOLLOW_UP
+  OTHER
+}
+
+enum FollowUpStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum ActivityRecordState {
+  DRAFT
+  SUBMITTED
+}
+
+// =============================================
+// USER
+// =============================================
+
+model User {
+  id           String   @id @default(cuid()) @db.VarChar(30)
+  name         String   @db.VarChar(120)
+  loginId      String   @unique @db.VarChar(191)
+  email        String?  @unique @db.VarChar(191)
+  phone        String?  @db.VarChar(25)
+  passwordHash String   @db.VarChar(255)
+  role         UserRole
+  isActive     Boolean  @default(true)
+
+  // Relasi pembuatan akun
+  createdById  String? @db.VarChar(30)
+  createdBy    User?   @relation("UserCreation", fields: [createdById], references: [id], onDelete: SetNull)
+  createdUsers User[]  @relation("UserCreation")
+
+  // Authentication
+  sessions Session[]
+
+  // Penugasan kolam
+  pondMemberships     PondMember[] @relation("PondMemberUser")
+  pondAssignmentsMade PondMember[] @relation("PondAssignedBy")
+
+  // Aktivitas operasional
+  recordedActivities  OperationalActivity[] @relation("RecordedActivities")
+  assignedActivities  OperationalActivity[] @relation("AssignedActivities")
+  performedActivities OperationalActivity[] @relation("PerformedActivities")
+
+  // Jadwal
+  schedulesCreated MaintenanceSchedule[]
+
+  // Notifikasi
+  notifications Notification[]
+  pushDevices   PushDevice[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([role, isActive])
+}
+
+// =============================================
+// SESSION AUTHENTICATION
+// =============================================
+
+model Session {
+  id        String   @id @default(cuid()) @db.VarChar(30)
+  tokenHash String   @unique @db.Char(64)
+  userId    String   @db.VarChar(30)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt])
+}
+
+// =============================================
+// LOGIN RATE LIMIT
+// =============================================
+
+// Pembatas percobaan login.
+// Rate limiting berdasarkan IP tetap diperlukan
+// pada deployment produksi.
+
+model LoginThrottle {
+  key             String    @id @db.Char(64)
+  failedCount     Int       @default(0)
+  windowStartedAt DateTime
+  lockedUntil     DateTime?
+  updatedAt       DateTime  @updatedAt
+}
+
+// =============================================
+// POND / KOLAM
+// =============================================
+
+model Pond {
+  id          String   @id @default(cuid()) @db.VarChar(30)
+  code        String   @unique @db.VarChar(50)
+  name        String   @db.VarChar(120)
+  type        PondType
+  fishSpecies String?  @db.VarChar(100)
+  isActive    Boolean  @default(true)
+
+  // Penugasan pengguna
+  members PondMember[]
+
+  // Perangkat dan pembacaan IoT
+  devices    SensorDevice[]
+  readings   WaterReading[]
+  thresholds WaterThreshold[]
+
+  // Operasional
+  schedules  MaintenanceSchedule[]
+  activities OperationalActivity[]
+
+  // Peringatan
+  alerts Alert[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive])
+  @@index([type])
+}
+
+// =============================================
+// POND MEMBER / ASSIGNMENT
+// =============================================
+
+// Admin menugaskan MANAGER atau OPERATOR
+// ke satu atau beberapa kolam.
+//
+// Satu kolam dapat memiliki banyak pengguna.
+// Satu pengguna dapat ditugaskan ke banyak kolam.
+//
+// Validasi role dan status akun dilakukan
+// melalui backend / Server Action.
+
+model PondMember {
+  pondId       String  @db.VarChar(30)
+  userId       String  @db.VarChar(30)
+  assignedById String? @db.VarChar(30)
+
+  pond       Pond  @relation(fields: [pondId], references: [id], onDelete: Cascade)
+  user       User  @relation("PondMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+  assignedBy User? @relation("PondAssignedBy", fields: [assignedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@id([pondId, userId])
+  @@index([userId])
+  @@index([assignedById])
+}
+
+// =============================================
+// SENSOR DEVICE
+// =============================================
+
+model SensorDevice {
+  id           String         @id @default(cuid()) @db.VarChar(30)
+  externalId   String         @unique @db.VarChar(100)
+  pondId       String         @db.VarChar(30)
+  pond         Pond           @relation(fields: [pondId], references: [id])
+  firebasePath String         @unique @db.VarChar(191)
+  isActive     Boolean        @default(true)
+  lastSeenAt   DateTime?
+  readings     WaterReading[]
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@index([pondId, isActive])
+}
+
+// =============================================
+// WATER READING / HISTORI IoT
+// =============================================
+
+// Firebase Realtime Database merupakan sumber
+// data realtime perangkat IoT.
+//
+// MySQL digunakan menyimpan histori sensor
+// yang telah disinkronkan.
+//
+// externalEventId membantu mencegah duplikasi
+// event ketika proses sinkronisasi.
+
+model WaterReading {
+  id       String        @id @default(cuid()) @db.VarChar(30)
+  pondId   String        @db.VarChar(30)
+  pond     Pond          @relation(fields: [pondId], references: [id])
+  deviceId String?       @db.VarChar(30)
+  device   SensorDevice? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  parameter WaterParameter
+  value     Decimal        @db.Decimal(10, 3)
+  unit      String         @db.VarChar(16)
+
+  observedAt DateTime
+  receivedAt DateTime @default(now())
+
+  externalEventId String? @unique @db.VarChar(191)
+
+  alerts Alert[]
+
+  @@index([pondId, parameter, observedAt])
+  @@index([deviceId, observedAt])
+}
+
+// =============================================
+// WATER THRESHOLD
+// =============================================
+
+model WaterThreshold {
+  id     String @id @default(cuid()) @db.VarChar(30)
+  pondId String @db.VarChar(30)
+  pond   Pond   @relation(fields: [pondId], references: [id])
+
+  parameter WaterParameter
+
+  minValue Decimal? @db.Decimal(10, 3)
+  maxValue Decimal? @db.Decimal(10, 3)
+
+  isEnabled Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([pondId, parameter])
+}
+
+// =============================================
+// MAINTENANCE SCHEDULE
+// =============================================
+
+model MaintenanceSchedule {
+  id     String @id @default(cuid()) @db.VarChar(30)
+  pondId String @db.VarChar(30)
+  pond   Pond   @relation(fields: [pondId], references: [id])
+
+  title           String   @db.VarChar(191)
+  nextRunAt       DateTime
+  intervalMinutes Int?
+  isEnabled       Boolean  @default(true)
+
+  createdById String @db.VarChar(30)
+  createdBy   User   @relation(fields: [createdById], references: [id])
+
+  alerts Alert[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isEnabled, nextRunAt])
+  @@index([pondId, nextRunAt])
+}
+
+// =============================================
+// ALERT / PERINGATAN
+// =============================================
+
+model Alert {
+  id     String @id @default(cuid()) @db.VarChar(30)
+  pondId String @db.VarChar(30)
+  pond   Pond   @relation(fields: [pondId], references: [id])
+
+  trigger   AlertTrigger
+  parameter WaterParameter?
+
+  measuredValue    Decimal? @db.Decimal(10, 3)
+  minValueSnapshot Decimal? @db.Decimal(10, 3)
+  maxValueSnapshot Decimal? @db.Decimal(10, 3)
+
+  scheduleId String?              @db.VarChar(30)
+  schedule   MaintenanceSchedule? @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+
+  readingId String?       @db.VarChar(30)
+  reading   WaterReading? @relation(fields: [readingId], references: [id], onDelete: SetNull)
+
+  message    String   @db.VarChar(500)
+  occurredAt DateTime
+  dedupKey   String?  @unique @db.VarChar(191)
+
+  notifications Notification[]
+  activities    OperationalActivity[]
+
+  createdAt DateTime @default(now())
+
+  @@index([pondId, occurredAt])
+  @@index([trigger, occurredAt])
+}
+
+// =============================================
+// NOTIFICATION
+// =============================================
+
+model Notification {
+  id String @id @default(cuid()) @db.VarChar(30)
+
+  alertId String @db.VarChar(30)
+  alert   Alert  @relation(fields: [alertId], references: [id])
+
+  userId String @db.VarChar(30)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  isRead Boolean   @default(false)
+  readAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@unique([alertId, userId])
+  @@index([userId, isRead, createdAt])
+}
+
+// =============================================
+// PUSH DEVICE / FIREBASE FCM
+// =============================================
+
+// Digunakan untuk menyimpan token perangkat
+// pada implementasi notifikasi Web Push.
+
+model PushDevice {
+  id String @id @default(cuid()) @db.VarChar(30)
+
+  userId String @db.VarChar(30)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  fcmToken  String  @db.Text
+  tokenHash String  @unique @db.Char(64)
+  isEnabled Boolean @default(true)
+
+  lastSeenAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([userId, isEnabled])
+}
+
+// =============================================
+// OPERATIONAL ACTIVITY / IF-6
+// =============================================
+
+model OperationalActivity {
+  id String @id @default(cuid()) @db.VarChar(30)
+
+  // Kolam sasaran
+  pondId String @db.VarChar(30)
+  pond   Pond   @relation(fields: [pondId], references: [id])
+
+  // Alert sumber tindakan (opsional)
+  alertId String? @db.VarChar(30)
+  alert   Alert?  @relation(fields: [alertId], references: [id], onDelete: SetNull)
+
+  // Jenis aktivitas dan waktu
+  type       ActivityType
+  activityAt DateTime
+
+  // Catatan aktivitas
+  description String  @db.Text
+  instruction String? @db.Text
+  result      String? @db.Text
+
+  // Status penanganan lapangan
+  status FollowUpStatus?
+
+  // Status penyimpanan
+  recordState ActivityRecordState @default(SUBMITTED)
+
+  // Pengguna pencatat
+  recordedById String @db.VarChar(30)
+  recordedBy   User   @relation("RecordedActivities", fields: [recordedById], references: [id])
+
+  // Petugas yang ditugaskan
+  assignedToId String? @db.VarChar(30)
+  assignedTo   User?   @relation("AssignedActivities", fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  // Petugas pelaksana
+  performedById String? @db.VarChar(30)
+  performedBy   User?   @relation("PerformedActivities", fields: [performedById], references: [id], onDelete: SetNull)
+
+  performedAt DateTime?
+
+  // Snapshot kualitas air ketika dicatat
+  phSnapshot          Decimal? @db.Decimal(10, 3)
+  temperatureSnapshot Decimal? @db.Decimal(10, 3)
+  tdsSnapshot         Decimal? @db.Decimal(10, 3)
+
+  // Timestamp pembacaan sensor
+  telemetryAt DateTime?
+
+  // Pengeluaran terkait aktivitas
+  expenses Expense[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([pondId, activityAt])
+  @@index([type, status])
+  @@index([recordState, createdAt])
+  @@index([assignedToId, status])
+  @@index([recordedById, createdAt])
+}
+
+// =============================================
+// EXPENSE / PENGELUARAN
+// =============================================
+
+model Expense {
+  id String @id @default(cuid()) @db.VarChar(30)
+
+  activityId String              @db.VarChar(30)
+  activity   OperationalActivity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+
+  category String  @db.VarChar(100)
+  amount   Decimal @db.Decimal(14, 2)
+
+  occurredAt  DateTime
+  description String?  @db.Text
+
+  // Lampiran bukti nota/struk
+  // Disimpan secara privat di MySQL.
+  receiptName String? @db.VarChar(191)
+  receiptMime String? @db.VarChar(60)
+  receiptData Bytes?  @db.MediumBlob
+
+  createdAt DateTime @default(now())
+
+  @@index([occurredAt])
+  @@index([activityId, occurredAt])
+}
