@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 
 import { logoutAction } from "@/app/login/actions";
-
+import type { ReactNode } from "react";
 type TopbarProps = {
   user: {
     name: string;
@@ -32,19 +32,20 @@ export function Topbar({
 
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const pageTitle =
+  const pageTitle = pathname.startsWith("/ponds")
+    ? "Tambah Kolam" :
     pathname === "/operations"
       ? "Pencatatan Aktivitas & Tindak Lanjut Operasional"
       : pathname === "/operations/history"
         ? "Riwayat Aktivitas Operasional"
         : pathname === "/ponds"
-          ? "Pengelolaan Kolam & Penugasan"
+          ? "Kelola Kolam"
           : pathname === "/users"
             ? "Daftar Akun Pengguna"
             : pathname.startsWith("/users/")
               ? "Detail Akun Pengguna"
               : pathname.startsWith("/dashboard")
-                ? "Monitoring Kualitas Air"
+                ? "Monitoring Kualitas Air Kolam"
                 : pathname.startsWith("/schedules")
                   ? "Jadwal & Pengingat"
                   : pathname.startsWith("/expenses")

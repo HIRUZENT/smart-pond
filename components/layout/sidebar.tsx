@@ -70,7 +70,7 @@ const navigation = [
     roles: ["ADMIN"],
   },
   {
-    title: "Kelola Kolam & Assign",
+    title: "Kelola Kolam",
     href: "/ponds",
     icon: Database,
     roles: ["ADMIN"],

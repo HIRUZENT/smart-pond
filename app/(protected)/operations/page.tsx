@@ -1,199 +1,315 @@
 
-import { Suspense } from "react";
-import { connection } from "next/server";
 import { redirect } from "next/navigation";
 
 import { prisma } from "@/src/lib/prisma";
 import { getCurrentUser } from "@/src/lib/auth";
-import { getAccessiblePondIds } from "@/lib/pond-access";
-import { ActivityForm } from "@/components/operations/activity-form";
-type TelemetryStatus =
-    | "NO_DATA"
-    | "NO_THRESHOLD"
-    | "WARNING"
-    | "NORMAL";
-async function OperationsContent() {
-    await connection();
 
-    const user = await getCurrentUser();
+import {
+  OperationsOverview,
+  type OperationRow,
+} from "@/components/operations/operations-overview";
 
-    if (!user) redirect("/login");
+export default async function OperationsPage() {
+  // =========================================
+  // 1. AUTENTIKASI
+  // =========================================
 
-    if (
-        user.role !== "MANAGER" &&
-        user.role !== "OPERATOR"
-    ) {
-        redirect("/users");
-    }
+  const user = await getCurrentUser();
 
-    const accessibleIds = await getAccessiblePondIds(user);
+  if (!user) {
+    redirect("/login");
+  }
 
-    const records = await prisma.pond.findMany({
-        where: {
-            id: { in: accessibleIds },
-            isActive: true,
+  // =========================================
+  // 2. BATASAN AKSES BERDASARKAN ROLE
+  // =========================================
+
+  // ADMIN melihat semua kolam.
+  // MANAGER dan OPERATOR hanya melihat kolam
+  // yang ditugaskan melalui PondMember.
+
+  const pondScope =
+    user.role === "ADMIN"
+      ? {}
+      : {
+        members: {
+          some: {
+            userId: user.id,
+          },
         },
-        orderBy: { name: "asc" },
-        include: {
-            thresholds: {
-                where: { isEnabled: true },
-            },
-            members: {
-                where: {
-                    user: {
-                        role: "OPERATOR",
-                        isActive: true,
-                    },
-                },
-                include: {
-                    user: {
-                        select: {
-                            id: true,
-                            name: true,
-                        },
-                    },
-                },
-            },
+      };
+
+  // =========================================
+  // 3. AMBIL DAFTAR KOLAM
+  // =========================================
+
+  const ponds = await prisma.pond.findMany({
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      type: true,
+      fishSpecies: true,
+      isActive: true,
+    },
+    orderBy: [
+      {
+        createdAt: "asc",
+      },
+      {
+        code: "asc",
+      },
+    ],
+  });
+
+  // =========================================
+  // 4. AMBIL RIWAYAT AKTIVITAS
+  // =========================================
+
+  const activities = await prisma.operationalActivity.findMany({
+    where: {
+      pond: pondScope,
+    },
+
+    include: {
+      // Identitas kolam
+      pond: {
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          fishSpecies: true,
         },
-    });
+      },
 
-    const parameters = [
-        "PH",
-        "TEMPERATURE",
-        "TDS",
-    ] as const;
+      // Konteks pengingat
+      alert: {
+        select: {
+          id: true,
+          trigger: true,
+          parameter: true,
+          measuredValue: true,
+          minValueSnapshot: true,
+          maxValueSnapshot: true,
+          message: true,
+          occurredAt: true,
 
-    const ponds = await Promise.all(
-        records.map(async (pond) => {
-            const readings = await Promise.all(
-                parameters.map((parameter) =>
-                    prisma.waterReading.findFirst({
-                        where: {
-                            pondId: pond.id,
-                            parameter,
-                        },
-                        orderBy: {
-                            observedAt: "desc",
-                        },
-                        select: {
-                            value: true,
-                            unit: true,
-                            observedAt: true,
-                        },
-                    })
+          // Jadwal jika alert berasal dari jadwal.
+          schedule: {
+            select: {
+              title: true,
+              nextRunAt: true,
+              intervalMinutes: true,
+            },
+          },
+
+          // Pembacaan sensor jika alert berasal
+          // dari kondisi kualitas air.
+          reading: {
+            select: {
+              parameter: true,
+              value: true,
+              unit: true,
+              observedAt: true,
+            },
+          },
+        },
+      },
+
+      // Pengguna yang mencatat
+      recordedBy: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+
+      // Pengguna yang ditugaskan
+      assignedTo: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+
+      // Pengguna yang melaksanakan
+      performedBy: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+
+      // Pengeluaran aktivitas
+      expenses: {
+        select: {
+          id: true,
+          category: true,
+          amount: true,
+          occurredAt: true,
+          description: true,
+        },
+
+        orderBy: {
+          occurredAt: "desc",
+        },
+      },
+    },
+
+    orderBy: [
+      {
+        activityAt: "desc",
+      },
+      {
+        createdAt: "desc",
+      },
+    ],
+  });
+
+  // =========================================
+  // 5. KONVERSI DATA PRISMA
+  // =========================================
+
+  // Decimal dan Date perlu dikonversi menjadi
+  // tipe sederhana sebelum dikirim ke Client Component.
+
+  const pondOptions = ponds.map((pond) => ({
+    id: pond.id,
+    code: pond.code,
+    name: pond.name,
+    isActive: pond.isActive,
+  }));
+
+  const operationRows: OperationRow[] = activities.map(
+    (activity) => {
+
+      const expenses = activity.expenses.map((expense) => ({
+        id: expense.id,
+        category: expense.category,
+        amount: Number(expense.amount.toString()),
+        occurredAt: expense.occurredAt.toISOString(),
+        description: expense.description,
+      }));
+
+      const expenseTotal = expenses.reduce(
+        (total, expense) => total + expense.amount,
+        0
+      );
+
+      return {
+        id: activity.id,
+
+        pond: {
+          id: activity.pond.id,
+          code: activity.pond.code,
+          name: activity.pond.name,
+          fishSpecies: activity.pond.fishSpecies,
+        },
+
+        type: activity.type,
+        activityAt: activity.activityAt.toISOString(),
+
+        description: activity.description,
+        instruction: activity.instruction,
+        status: activity.status,
+        result: activity.result,
+
+        recordState: activity.recordState,
+
+        assignedTo: activity.assignedTo
+          ? {
+            id: activity.assignedTo.id,
+            name: activity.assignedTo.name,
+          }
+          : null,
+
+        performedBy: activity.performedBy
+          ? {
+            id: activity.performedBy.id,
+            name: activity.performedBy.name,
+          }
+          : null,
+
+        recordedBy: {
+          id: activity.recordedBy.id,
+          name: activity.recordedBy.name,
+        },
+
+        performedAt:
+          activity.performedAt?.toISOString() ?? null,
+
+        alert: activity.alert
+          ? {
+            id: activity.alert.id,
+            trigger: activity.alert.trigger,
+            parameter: activity.alert.parameter,
+            measuredValue:
+              activity.alert.measuredValue !== null
+                ? Number(
+                  activity.alert.measuredValue.toString()
                 )
-            );
+                : null,
 
+            minValueSnapshot:
+              activity.alert.minValueSnapshot !== null
+                ? Number(
+                  activity.alert.minValueSnapshot.toString()
+                )
+                : null,
 
-            const telemetry = parameters.map((parameter, index) => {
-                const reading = readings[index];
+            maxValueSnapshot:
+              activity.alert.maxValueSnapshot !== null
+                ? Number(
+                  activity.alert.maxValueSnapshot.toString()
+                )
+                : null,
 
-                const threshold = pond.thresholds.find(
-                    (item) => item.parameter === parameter
-                );
+            message: activity.alert.message,
+            occurredAt:
+              activity.alert.occurredAt.toISOString(),
 
-                const value = reading
-                    ? Number(reading.value)
-                    : null;
-
-                const outOfRange =
-                    value !== null &&
-                    threshold !== undefined &&
-                    (
-                        (threshold.minValue !== null &&
-                            value < Number(threshold.minValue)) ||
-                        (threshold.maxValue !== null &&
-                            value > Number(threshold.maxValue))
-                    );
-
-                const status:
-                    | "NO_DATA"
-                    | "NO_THRESHOLD"
-                    | "WARNING"
-                    | "NORMAL" =
-                    value === null
-                        ? "NO_DATA"
-                        : !threshold
-                            ? "NO_THRESHOLD"
-                            : outOfRange
-                                ? "WARNING"
-                                : "NORMAL";
-
-                return {
-                    parameter,
-                    value,
-                    unit:
-                        reading?.unit ??
-                        (parameter === "TEMPERATURE"
-                            ? "°C"
-                            : parameter === "TDS"
-                                ? "mg/L"
-                                : ""),
-                    observedAt:
-                        reading?.observedAt.toISOString() ?? null,
-                    status,
-                };
-            });
-
-
-            return {
-                id: pond.id,
-                name: pond.name,
-                code: pond.code,
-                telemetry,
-                operators: pond.members.map(
-                    (member) => member.user
+            reading: activity.alert.reading
+              ? {
+                parameter: activity.alert.reading.parameter,
+                value: Number(
+                  activity.alert.reading.value.toString()
                 ),
-            };
-        })
-    );
+                unit: activity.alert.reading.unit,
+                observedAt:
+                  activity.alert.reading.observedAt.toISOString(),
+              }
+              : null,
 
-    const formatter = new Intl.DateTimeFormat(
-        "en-GB",
-        {
-            timeZone: "Asia/Jakarta",
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit",
-            hourCycle: "h23",
-        }
-    );
+            schedule: activity.alert.schedule
+              ? {
+                title: activity.alert.schedule.title,
+                nextRunAt:
+                  activity.alert.schedule.nextRunAt.toISOString(),
+                intervalMinutes:
+                  activity.alert.schedule.intervalMinutes,
+              }
+              : null,
+          }
+          : null,
 
-    const parts = Object.fromEntries(
-        formatter
-            .formatToParts(new Date())
-            .map((part) => [part.type, part.value])
-    );
+        expenses,
+        expenseTotal,
 
-    const initialDate =
-        `${parts.year}-${parts.month}-${parts.day}`;
+        createdAt: activity.createdAt.toISOString(),
+        updatedAt: activity.updatedAt.toISOString(),
+      };
+    }
+  );
 
-    const initialTime =
-        `${parts.hour}:${parts.minute}`;
+  // =========================================
+  // 6. RENDER
+  // =========================================
 
-    return (
-        <ActivityForm
-            ponds={ponds}
-            role={user.role}
-            currentUserId={user.id}
-            initialDate={initialDate}
-            initialTime={initialTime}
-        />
-    );
-}
-
-export default function OperationsPage() {
-    return (
-        <Suspense
-            fallback={
-                <div className="flex min-h-[60vh] items-center justify-center">
-                    <div className="h-10 w-10 animate-spin rounded-full border-4 border-blue-100 border-t-blue-600" />
-                </div>
-            }
-        >
-            <OperationsContent />
-        </Suspense>
-    );
+  return (
+    <OperationsOverview
+      activities={operationRows}
+      ponds={pondOptions}
+      canCreateActivity={true}
+    />
+  );
 }

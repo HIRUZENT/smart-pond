@@ -2,12 +2,17 @@
 "use server";
 
 import { hash } from "bcryptjs";
+import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
 import { requireRole } from "@/src/lib/auth";
 import { prisma } from "@/src/lib/prisma";
+
+// =============================================
+// ACTION STATE
+// =============================================
 
 export type PondAdminState = {
   error: string | null;
@@ -24,26 +29,54 @@ const initialSuccess = (message: string): PondAdminState => ({
   success: message,
 });
 
+// =============================================
+// FORM DATA HELPER
+// =============================================
+
 function textValue(data: FormData, key: string) {
   const value = data.get(key);
   return typeof value === "string" ? value : "";
 }
 
+// =============================================
+// POND VALIDATION
+// Kode kolam tidak lagi diinput manual.
+// =============================================
+
 const createPondSchema = z.object({
-  code: z.string().trim().min(2).max(50),
-  name: z.string().trim().min(2).max(120),
-  type: z.enum(["PARIT_SEKAT", "TABUNG"]),
-  fishSpecies: z.string().trim().max(100),
+  name: z
+    .string()
+    .trim()
+    .min(2, "Nama kolam minimal 2 karakter.")
+    .max(120, "Nama kolam maksimal 120 karakter."),
+
+  type: z.enum(["PARIT_SEKAT", "TABUNG"], {
+    error: "Jenis kolam tidak valid.",
+  }),
+
+  fishSpecies: z
+    .string()
+    .trim()
+    .max(100, "Nama komoditas maksimal 100 karakter.")
+    .transform((value) => value || null),
 });
+
+// =============================================
+// CREATE POND
+// Pendaftaran kolam baru oleh ADMIN
+// Kode dibuat otomatis berdasarkan Primary Key.
+// =============================================
 
 export async function createPondAction(
   _previous: PondAdminState,
   formData: FormData
 ): Promise<PondAdminState> {
+
+  // Pastikan hanya ADMIN yang dapat mendaftarkan kolam.
   await requireRole("ADMIN");
 
+  // Validasi input tanpa kode kolam.
   const parsed = createPondSchema.safeParse({
-    code: textValue(formData, "code"),
     name: textValue(formData, "name"),
     type: textValue(formData, "type"),
     fishSpecies: textValue(formData, "fishSpecies"),
@@ -52,53 +85,104 @@ export async function createPondAction(
   if (!parsed.success) {
     return initialError(
       parsed.error.issues[0]?.message ??
-      "Data kolam tidak valid."
+        "Data kolam tidak valid."
     );
   }
 
   const data = parsed.data;
 
   try {
-    await prisma.pond.create({
-      data: {
-        code: data.code,
-        name: data.name,
-        type: data.type,
-        fishSpecies: data.fishSpecies || null,
-        isActive: true,
-      },
-    });
+    // Buat kolam dan kode otomatis dalam satu transaksi.
+    const createdPond = await prisma.$transaction(
+      async (tx) => {
+
+        // 1. Buat kolam terlebih dahulu.
+        // Kode sementara digunakan untuk memenuhi
+        // kolom code yang wajib dan bersifat unique.
+
+        const pond = await tx.pond.create({
+          data: {
+            code: `TEMP-${randomUUID()}`,
+            name: data.name,
+            type: data.type,
+            fishSpecies: data.fishSpecies,
+            isActive: true,
+          },
+          select: {
+            id: true,
+          },
+        });
+
+        // 2. Bentuk kode berdasarkan Primary Key Prisma.
+
+        const generatedCode =
+          `KLM-${String(pond.id).toUpperCase()}`;
+
+        // 3. Ganti kode sementara dengan kode otomatis.
+
+        await tx.pond.update({
+          where: {
+            id: pond.id,
+          },
+          data: {
+            code: generatedCode,
+          },
+        });
+
+        return {
+          id: pond.id,
+          code: generatedCode,
+        };
+      }
+    );
+
+    // Perbarui cache halaman terkait.
+    revalidatePath("/ponds");
+    revalidatePath("/dashboard");
+    revalidatePath("/operations");
+
+    return initialSuccess(
+      `Kolam berhasil didaftarkan.`
+    );
+
   } catch (error) {
+
+    // Tangani kemungkinan kode duplikat.
     if (
       (error as { code?: string }).code === "P2002"
     ) {
       return initialError(
-        "Kode kolam sudah digunakan."
+        "Terjadi duplikasi kode kolam. Silakan coba kembali."
       );
     }
 
     console.error("CREATE POND:", error);
+
     return initialError(
-      "Gagal menambahkan kolam."
+      "Gagal menambahkan kolam. Silakan coba kembali."
     );
   }
-
-  revalidatePath("/ponds");
-
-  return initialSuccess(
-    "Kolam baru berhasil didaftarkan."
-  );
 }
+
+// =============================================
+// POND ASSIGNMENT VALIDATION
+// =============================================
 
 const assignmentSchema = z.object({
   pondId: z.string().min(1),
   userId: z.string().min(1),
 });
 
+// =============================================
+// ASSIGN POND
+// Menugaskan MANAGER / OPERATOR ke kolam
+// =============================================
+
 export async function assignPondAction(
   _previous: PondAdminState,
   formData: FormData
 ): Promise<PondAdminState> {
+
   const admin = await requireRole("ADMIN");
 
   const parsed = assignmentSchema.safeParse({
@@ -114,10 +198,12 @@ export async function assignPondAction(
 
   const { pondId, userId } = parsed.data;
 
+  // Periksa keberadaan kolam dan pengguna.
   const [pond, user] = await Promise.all([
     prisma.pond.findUnique({
       where: { id: pondId },
     }),
+
     prisma.user.findUnique({
       where: { id: userId },
     }),
@@ -139,6 +225,7 @@ export async function assignPondAction(
   }
 
   try {
+    // Gunakan upsert agar penugasan tidak duplikat.
     await prisma.pondMember.upsert({
       where: {
         pondId_userId: {
@@ -146,23 +233,29 @@ export async function assignPondAction(
           userId,
         },
       },
+
       update: {
         assignedById: admin.id,
       },
+
       create: {
         pondId,
         userId,
         assignedById: admin.id,
       },
     });
+
   } catch (error) {
     console.error("ASSIGN POND:", error);
+
     return initialError(
       "Gagal menetapkan pengguna ke kolam."
     );
   }
 
+  // Perbarui halaman terkait.
   revalidatePath("/ponds");
+  revalidatePath("/dashboard");
   revalidatePath("/operations");
 
   return initialSuccess(
@@ -170,9 +263,15 @@ export async function assignPondAction(
   );
 }
 
+// =============================================
+// REMOVE POND ASSIGNMENT
+// Menghapus penugasan pengguna dari kolam
+// =============================================
+
 export async function removePondAssignmentAction(
   formData: FormData
 ) {
+
   await requireRole("ADMIN");
 
   const parsed = assignmentSchema.safeParse({
@@ -190,26 +289,50 @@ export async function removePondAssignmentAction(
   });
 
   revalidatePath("/ponds");
+  revalidatePath("/dashboard");
   revalidatePath("/operations");
+
   redirect("/ponds");
 }
 
+// =============================================
+// CREATE ADMIN VALIDATION
 // Pendaftaran Admin baru.
 // Endpoint ini tidak tersedia untuk publik.
+// =============================================
+
 const createAdminSchema = z.object({
-  name: z.string().trim().min(2).max(120),
-  email: z.email().trim().toLowerCase().max(191),
-  password: z.string().min(12).refine(
-    (value) =>
-      Buffer.byteLength(value, "utf8") <= 72,
-    "Password terlalu panjang."
-  ),
+  name: z
+    .string()
+    .trim()
+    .min(2, "Nama minimal 2 karakter.")
+    .max(120),
+
+  email: z
+    .email()
+    .trim()
+    .toLowerCase()
+    .max(191),
+
+  password: z
+    .string()
+    .min(12, "Password minimal 12 karakter.")
+    .refine(
+      (value) =>
+        Buffer.byteLength(value, "utf8") <= 72,
+      "Password terlalu panjang."
+    ),
 });
+
+// =============================================
+// CREATE ADMIN ACCOUNT
+// =============================================
 
 export async function createAdminAccountAction(
   _previous: PondAdminState,
   formData: FormData
 ): Promise<PondAdminState> {
+
   const admin = await requireRole("ADMIN");
 
   const parsed = createAdminSchema.safeParse({
@@ -221,7 +344,7 @@ export async function createAdminAccountAction(
   if (!parsed.success) {
     return initialError(
       parsed.error.issues[0]?.message ??
-      "Data admin tidak valid."
+        "Data admin tidak valid."
     );
   }
 
@@ -239,7 +362,9 @@ export async function createAdminAccountAction(
         createdById: admin.id,
       },
     });
+
   } catch (error) {
+
     if (
       (error as { code?: string }).code === "P2002"
     ) {

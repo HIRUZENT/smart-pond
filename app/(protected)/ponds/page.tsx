@@ -61,14 +61,9 @@ async function PondAdminContent() {
         code: pond.code,
         name: pond.name,
         type: pond.type,
+        fishSpecies: pond.fishSpecies,
         isActive: pond.isActive,
-        members: pond.members.map((member) => ({
-          id: member.user.id,
-          name: member.user.name,
-          role: member.user.role,
-        })),
       }))}
-      users={users}
     />
   );
 }

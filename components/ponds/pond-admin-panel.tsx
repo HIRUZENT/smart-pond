@@ -1,437 +1,658 @@
 
 "use client";
-
-import { useActionState } from "react";
+import { useActionState, useEffect } from "react";
+import Swal from "sweetalert2";
 import { useFormStatus } from "react-dom";
 
 import {
   CircleCheck,
   Plus,
-  Users,
   Waves,
-  ShieldCheck,
+  Fish,
+  Layers3,
+  CheckCircle2,
+  AlertCircle,
 } from "lucide-react";
 
 import {
-  assignPondAction,
   createPondAction,
-  createAdminAccountAction,
-  removePondAssignmentAction,
   type PondAdminState,
 } from "@/app/(protected)/ponds/actions";
 
-type Member = {
-  id: string;
-  name: string;
-  role: string;
-};
+// =============================================
+// TYPES
+// =============================================
 
 type Pond = {
   id: string;
   code: string;
   name: string;
   type: string;
+  fishSpecies: string | null;
   isActive: boolean;
-  members: Member[];
 };
 
 type Props = {
   ponds: Pond[];
-  users: Member[];
 };
+
+// =============================================
+// INITIAL STATE
+// =============================================
 
 const initialState: PondAdminState = {
   error: null,
   success: null,
 };
 
-const inputClass =
-  "h-10 w-full rounded-lg border border-[#C8D0E5] " +
-  "bg-white px-3 text-sm text-slate-800 " +
-  "outline-none focus:border-blue-500 " +
-  "focus:ring-2 focus:ring-blue-100";
+// =============================================
+// STYLE
+// =============================================
 
-function Submit({
-  text,
-}: {
-  text: string;
-}) {
+const inputClass =
+  "h-11 w-full rounded-lg border border-[#CBD3E7] " +
+  "bg-white px-3.5 text-sm font-medium text-[#1F2937] " +
+  "placeholder:text-[#64748B] placeholder:opacity-100 " +
+  "outline-none transition-all duration-200 " +
+  "hover:border-[#94A3B8] " +
+  "focus:border-blue-500 focus:ring-2 focus:ring-blue-100";
+
+// =============================================
+// SUBMIT BUTTON
+// =============================================
+
+function SubmitButton() {
   const { pending } = useFormStatus();
 
   return (
     <button
       type="submit"
       disabled={pending}
-      className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[#0754CC] px-5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+      className="
+        inline-flex h-11 items-center justify-center gap-2
+        rounded-lg bg-[#0754CC] px-5
+        text-sm font-semibold text-white
+        shadow-sm transition-all
+        hover:bg-blue-700
+        active:scale-[0.98]
+        disabled:cursor-not-allowed
+        disabled:opacity-50
+      "
     >
-      <Plus size={16} />
-      {pending ? "Menyimpan..." : text}
+      <Plus size={17} />
+      {pending ? "Menyimpan..." : "Daftarkan Kolam"}
     </button>
   );
 }
+
+// =============================================
+// FEEDBACK
+// =============================================
+
 
 function Feedback({
   state,
 }: {
   state: PondAdminState;
 }) {
-  if (!state.error && !state.success) return null;
+  useEffect(() => {
+    if (!state.error && !state.success) return;
 
-  return (
-    <div
-      role="status"
-      className={`rounded-lg border p-3 text-sm ${
-        state.error
-          ? "border-red-200 bg-red-50 text-red-700"
-          : "border-green-200 bg-green-50 text-green-700"
-      }`}
-    >
-      {state.error ?? state.success}
-    </div>
-  );
+    const isError = Boolean(state.error);
+
+    void Swal.fire({
+      icon: isError ? "error" : "success",
+
+      title: isError
+        ? "Gagal!"
+        : "Berhasil!",
+
+      text: state.error ?? state.success ?? "",
+
+      position: "top",
+
+      showConfirmButton: isError,
+
+      confirmButtonText: "Mengerti",
+
+      confirmButtonColor: "#0754CC",
+
+      timer: isError ? undefined : 2500,
+
+      timerProgressBar: !isError,
+
+      allowOutsideClick: !isError,
+
+      allowEscapeKey: true,
+
+      background: "#FFFFFF",
+
+      color: "#1F2937",
+
+      iconColor: isError ? "#DC2626" : "#16A34A",
+
+      width: "420px",
+
+      padding: "1.5rem",
+
+      customClass: {
+        popup: "rounded-2xl shadow-2xl",
+        title: "text-lg font-bold",
+        htmlContainer: "text-sm",
+        confirmButton:
+          "rounded-lg px-5 py-2.5 text-sm font-semibold",
+      },
+    });
+
+  }, [state]);
+
+  return null;
 }
 
-export function PondAdminPanel({
-  ponds,
-  users,
-}: Props) {
+
+// =============================================
+// POND TYPE LABEL
+// =============================================
+
+function pondTypeLabel(type: string) {
+  switch (type) {
+    case "TABUNG":
+      return "Tabung";
+
+    case "PARIT_SEKAT":
+      return "Parit Sekat";
+
+    default:
+      return type;
+  }
+}
+
+// =============================================
+// MAIN COMPONENT
+// =============================================
+
+export function PondAdminPanel({ ponds }: Props) {
   const [pondState, pondAction] = useActionState(
     createPondAction,
     initialState
   );
 
-  const [assignState, assignAction] = useActionState(
-    assignPondAction,
-    initialState
-  );
+  const activeCount = ponds.filter(
+    (pond) => pond.isActive
+  ).length;
 
-  const [adminState, adminAction] = useActionState(
-    createAdminAccountAction,
-    initialState
-  );
+  const inactiveCount = ponds.length - activeCount;
 
   return (
-    <div className="mx-auto max-w-[1100px] space-y-6">
-      <div className="rounded-xl border border-slate-200 bg-white p-6">
-        <h1 className="text-xl font-bold text-slate-900">
-          Pengelolaan Kolam & Penugasan
-        </h1>
-        <p className="mt-2 text-sm text-slate-500">
-          Admin dapat mendaftarkan kolam,
-          menetapkan pengelola dan petugas,
-          serta membuat akun Admin.
-        </p>
-      </div>
+    <div className="mx-auto w-full max-w-[1100px] space-y-6">
 
-      {/* DAFTAR KOLAM */}
-      <section className="rounded-xl border border-[#C8D0E5] bg-white p-5">
-        <div className="mb-4 flex items-center gap-2">
-          <Waves size={20} className="text-blue-600" />
-          <h2 className="font-semibold text-slate-900">
-            Daftar Kolam Terdaftar
-          </h2>
+      {/* HEADER */}
+
+      <section
+        className="
+          flex flex-col justify-between gap-4
+          rounded-xl border border-[#CBD3E7]
+          bg-white p-5 shadow-sm
+          sm:flex-row sm:items-center
+        "
+      >
+        <div className="flex items-center gap-3">
+          <div
+            className="
+              flex h-11 w-11 shrink-0 items-center
+              justify-center rounded-xl bg-blue-50
+            "
+          >
+            <Waves size={23} className="text-blue-600" />
+          </div>
+
+          <div>
+            <h1 className="text-xl font-bold tracking-tight text-[#1F2937]">
+              Kelola Kolam
+            </h1>
+
+            <p className="mt-1 text-sm text-[#475569]">
+              Kelola dan daftarkan kolam budidaya
+              Pondok Lestari.
+            </p>
+          </div>
         </div>
 
-        <div className="space-y-3">
+        <a
+          href="#tambah-kolam"
+          className="
+            inline-flex h-10 items-center justify-center gap-2
+            rounded-lg bg-[#0754CC] px-4
+            text-sm font-semibold text-white
+            transition hover:bg-blue-700
+          "
+        >
+          <Plus size={17} />
+          Tambah Kolam
+        </a>
+      </section>
+
+      {/* SUMMARY */}
+
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+
+        {/* TOTAL */}
+
+        <div
+          className="
+            flex items-center justify-between
+            rounded-xl border border-[#D5DCEB]
+            bg-white p-5 shadow-sm
+          "
+        >
+          <div>
+            <p className="text-sm text-[#475569]">
+              Total Kolam
+            </p>
+
+            <p className="mt-2 text-3xl font-bold text-[#1F2937]">
+              {ponds.length}
+            </p>
+
+            <p className="mt-1 text-xs text-[#64748B]">
+              Seluruh kolam terdaftar
+            </p>
+          </div>
+
+          <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-blue-100">
+            <Waves size={25} className="text-blue-600" />
+          </div>
+        </div>
+
+        {/* ACTIVE */}
+
+        <div
+          className="
+            flex items-center justify-between
+            rounded-xl border border-[#D5DCEB]
+            bg-white p-5 shadow-sm
+          "
+        >
+          <div>
+            <p className="text-sm text-[#475569]">
+              Kolam Aktif
+            </p>
+
+            <p className="mt-2 text-3xl font-bold text-[#15803D]">
+              {activeCount}
+            </p>
+
+            <p className="mt-1 text-xs text-[#64748B]">
+              Siap digunakan
+            </p>
+          </div>
+
+          <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-green-100">
+            <CircleCheck size={25} className="text-green-700" />
+          </div>
+        </div>
+
+        {/* INACTIVE */}
+
+        <div
+          className="
+            flex items-center justify-between
+            rounded-xl border border-[#D5DCEB]
+            bg-white p-5 shadow-sm
+          "
+        >
+          <div>
+            <p className="text-sm text-[#475569]">
+              Kolam Nonaktif
+            </p>
+
+            <p className="mt-2 text-3xl font-bold text-[#64748B]">
+              {inactiveCount}
+            </p>
+
+            <p className="mt-1 text-xs text-[#64748B]">
+              Tidak sedang digunakan
+            </p>
+          </div>
+
+          <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-slate-100">
+            <Layers3 size={25} className="text-slate-600" />
+          </div>
+        </div>
+
+      </section>
+
+      {/* POND LIST */}
+
+      <section
+        className="
+          rounded-xl border border-[#CBD3E7]
+          bg-white p-5 shadow-sm
+        "
+      >
+        <div
+          className="
+            mb-5 flex flex-wrap items-center
+            justify-between gap-3
+            border-b border-[#E2E8F0] pb-4
+          "
+        >
+          <div className="flex items-center gap-2">
+            <Waves size={20} className="text-blue-600" />
+
+            <div>
+              <h2 className="font-semibold text-[#1F2937]">
+                Daftar Kolam Terdaftar
+              </h2>
+
+              <p className="mt-1 text-xs text-[#64748B]">
+                Informasi seluruh kolam budidaya.
+              </p>
+            </div>
+          </div>
+
+          <span
+            className="
+              rounded-full border border-blue-100
+              bg-blue-50 px-3 py-1.5
+              text-xs font-semibold text-blue-700
+            "
+          >
+            {ponds.length} Kolam
+          </span>
+        </div>
+
+        {/* POND CARDS */}
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+
           {ponds.map((pond) => (
             <div
               key={pond.id}
-              className="rounded-lg border border-slate-200 p-4"
+              className="
+                rounded-xl border border-[#DCE3EF]
+                bg-white p-4 transition-all
+                hover:border-blue-300 hover:shadow-sm
+              "
             >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="font-semibold text-slate-900">
-                    {pond.name}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    {pond.code} ·{" "}
-                    {pond.type === "TABUNG"
-                      ? "Tabung"
-                      : "Parit Sekat"}
-                  </p>
+              <div className="flex items-start justify-between gap-3">
+
+                <div className="flex items-center gap-3">
+                  <div
+                    className="
+                      flex h-11 w-11 shrink-0
+                      items-center justify-center
+                      rounded-xl bg-blue-50
+                    "
+                  >
+                    <Waves size={21} className="text-blue-600" />
+                  </div>
+
+                  <div>
+                    <h3 className="text-sm font-bold text-[#1F2937]">
+                      {pond.name}
+                    </h3>
+
+                    <p className="mt-1 text-xs font-medium text-[#64748B]">
+                      {pond.code}
+                    </p>
+                  </div>
                 </div>
 
                 <span
-                  className={`rounded-full px-3 py-1 text-xs ${
-                    pond.isActive
-                      ? "bg-green-50 text-green-700"
-                      : "bg-slate-100 text-slate-500"
-                  }`}
+                  className={`
+                    shrink-0 rounded-full px-3 py-1
+                    text-xs font-semibold
+                    ${
+                      pond.isActive
+                        ? "border border-green-200 bg-green-50 text-green-700"
+                        : "border border-slate-200 bg-slate-100 text-[#475569]"
+                    }
+                  `}
                 >
                   {pond.isActive ? "Aktif" : "Nonaktif"}
                 </span>
+
               </div>
 
-              <div className="mt-4 space-y-2">
-                {pond.members.map((member) => (
-                  <div
-                    key={member.id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2"
-                  >
-                    <div>
-                      <p className="text-sm font-medium text-slate-800">
-                        {member.name}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {member.role === "MANAGER"
-                          ? "Pengelola"
-                          : "Petugas"}
-                      </p>
-                    </div>
-
-                    <form
-                      action={removePondAssignmentAction}
-                    >
-                      <input
-                        type="hidden"
-                        name="pondId"
-                        value={pond.id}
-                      />
-                      <input
-                        type="hidden"
-                        name="userId"
-                        value={member.id}
-                      />
-                      <button
-                        type="submit"
-                        className="rounded-md border border-red-200 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50"
-                      >
-                        Hapus Penugasan
-                      </button>
-                    </form>
-                  </div>
-                ))}
-
-                {pond.members.length === 0 && (
-                  <p className="text-xs text-amber-700">
-                    Belum memiliki pengguna yang ditugaskan.
+              <div
+                className="
+                  mt-4 grid grid-cols-2 gap-3
+                  border-t border-[#E2E8F0] pt-4
+                "
+              >
+                <div>
+                  <p className="text-xs text-[#64748B]">
+                    Jenis Kolam
                   </p>
-                )}
+
+                  <p className="mt-1 text-sm font-semibold text-[#334155]">
+                    {pondTypeLabel(pond.type)}
+                  </p>
+                </div>
+
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <Fish size={14} className="text-[#64748B]" />
+
+                    <p className="text-xs text-[#64748B]">
+                      Jenis Ikan
+                    </p>
+                  </div>
+
+                  <p className="mt-1 text-sm font-semibold text-[#334155]">
+                    {pond.fishSpecies || "-"}
+                  </p>
+                </div>
               </div>
             </div>
           ))}
 
+          {/* EMPTY STATE */}
+
           {ponds.length === 0 && (
-            <p className="py-6 text-center text-sm text-slate-500">
-              Belum ada kolam terdaftar.
-            </p>
+            <div
+              className="
+                col-span-full flex flex-col
+                items-center justify-center
+                rounded-xl border border-dashed
+                border-[#CBD5E1] bg-[#F8FAFC]
+                px-5 py-12 text-center
+              "
+            >
+              <div
+                className="
+                  flex h-14 w-14 items-center
+                  justify-center rounded-full bg-blue-50
+                "
+              >
+                <Waves size={26} className="text-blue-600" />
+              </div>
+
+              <h3 className="mt-4 text-sm font-semibold text-[#1F2937]">
+                Belum Ada Kolam
+              </h3>
+
+              <p className="mt-2 max-w-sm text-sm text-[#64748B]">
+                Belum ada kolam yang terdaftar.
+                Silakan daftarkan kolam pertama
+                untuk memulai pengelolaan.
+              </p>
+            </div>
           )}
+
         </div>
       </section>
 
-      {/* FORM TAMBAH KOLAM */}
-      <section className="rounded-xl border border-[#C8D0E5] bg-white p-5">
-        <div className="mb-5 flex items-center gap-2 border-b border-slate-200 pb-4">
-          <Plus size={19} className="text-blue-600" />
-          <h2 className="font-semibold text-slate-900">
-            Daftarkan Kolam Baru
-          </h2>
+      {/* CREATE POND FORM */}
+
+      <section
+        id="tambah-kolam"
+        className="
+          scroll-mt-6 rounded-xl
+          border border-[#CBD3E7]
+          bg-white p-5 shadow-sm
+        "
+      >
+        <div
+          className="
+            mb-5 flex items-center gap-3
+            border-b border-[#E2E8F0] pb-4
+          "
+        >
+          <div
+            className="
+              flex h-10 w-10 items-center
+              justify-center rounded-lg bg-blue-50
+            "
+          >
+            <Plus size={21} className="text-blue-600" />
+          </div>
+
+          <div>
+            <h2 className="font-semibold text-[#1F2937]">
+              Daftarkan Kolam Baru
+            </h2>
+
+            <p className="mt-1 text-xs text-[#64748B]">
+              Lengkapi informasi kolam yang akan ditambahkan ke sistem.
+            </p>
+          </div>
         </div>
 
-        <form action={pondAction} className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
+        <form action={pondAction} className="space-y-5">
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+
+            {/* NAMA KOLAM */}
+
             <div>
-              <label className="mb-1.5 block text-xs font-medium">
-                Kode Kolam
+              <label
+                htmlFor="pond-name"
+                className="mb-2 block text-sm font-medium text-[#334155]"
+              >
+                Nama Kolam
+                <span className="ml-1 text-red-500">*</span>
               </label>
+
               <input
-                name="code"
-                placeholder="KLM-001"
+                id="pond-name"
+                name="name"
+                type="text"
+                placeholder="Contoh: Kolam 4 - Gurame"
                 required
                 minLength={2}
-                maxLength={50}
+                maxLength={120}
                 className={inputClass}
               />
             </div>
 
-            <div>
-              <label className="mb-1.5 block text-xs font-medium">
-                Nama Kolam
-              </label>
-              <input
-                name="name"
-                placeholder="Kolam 4 - Gurame"
-                required
-                className={inputClass}
-              />
-            </div>
+            {/* JENIS KOLAM */}
 
             <div>
-              <label className="mb-1.5 block text-xs font-medium">
+              <label
+                htmlFor="pond-type"
+                className="mb-2 block text-sm font-medium text-[#334155]"
+              >
                 Jenis Kolam
+                <span className="ml-1 text-red-500">*</span>
               </label>
+
               <select
+                id="pond-type"
                 name="type"
+                required
+                defaultValue="PARIT_SEKAT"
                 className={inputClass}
               >
                 <option value="PARIT_SEKAT">
                   Parit Sekat
                 </option>
+
                 <option value="TABUNG">
                   Tabung
                 </option>
               </select>
             </div>
 
+            {/* JENIS IKAN */}
+
             <div>
-              <label className="mb-1.5 block text-xs font-medium">
+              <label
+                htmlFor="pond-fish"
+                className="mb-2 block text-sm font-medium text-[#334155]"
+              >
                 Jenis Ikan
               </label>
+
               <input
+                id="pond-fish"
                 name="fishSpecies"
-                placeholder="Gurame"
+                type="text"
+                placeholder="Contoh: Gurame"
+                maxLength={100}
                 className={inputClass}
               />
+
+              {/* <p className="mt-1.5 text-xs text-[#64748B]">
+                Boleh dikosongkan jika belum ditentukan.
+              </p> */}
             </div>
+
           </div>
 
           <Feedback state={pondState} />
-          <Submit text="Daftarkan Kolam" />
-        </form>
-      </section>
 
-      {/* PENUGASAN KOLAM */}
-      <section className="rounded-xl border border-[#C8D0E5] bg-white p-5">
-        <div className="mb-5 flex items-center gap-2 border-b border-slate-200 pb-4">
-          <Users size={19} className="text-blue-600" />
-          <h2 className="font-semibold text-slate-900">
-            Assign Pengelola / Petugas
-          </h2>
-        </div>
+          {/* BUTTONS */}
 
-        <form action={assignAction} className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label className="mb-1.5 block text-xs font-medium">
-                Pilih Kolam
-              </label>
+          <div
+            className="
+              flex flex-col-reverse justify-end
+              gap-3 border-t border-[#E2E8F0]
+              pt-4 sm:flex-row
+            "
+          >
+            <button
+              type="reset"
+              className="
+                h-11 rounded-lg border
+                border-[#CBD3E1] bg-white
+                px-5 text-sm font-medium
+                text-[#334155] transition
+                hover:bg-[#F8FAFC]
+              "
+            >
+              Reset
+            </button>
 
-              <select
-                name="pondId"
-                required
-                className={inputClass}
-                defaultValue=""
-              >
-                <option value="" disabled>
-                  Pilih kolam...
-                </option>
-
-                {ponds
-                  .filter((pond) => pond.isActive)
-                  .map((pond) => (
-                    <option
-                      key={pond.id}
-                      value={pond.id}
-                    >
-                      {pond.name}
-                    </option>
-                  ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="mb-1.5 block text-xs font-medium">
-                Pilih Pengguna
-              </label>
-
-              <select
-                name="userId"
-                required
-                className={inputClass}
-                defaultValue=""
-              >
-                <option value="" disabled>
-                  Pilih Pengelola/Petugas...
-                </option>
-
-                {users.map((user) => (
-                  <option
-                    key={user.id}
-                    value={user.id}
-                  >
-                    {user.name} (
-                    {user.role === "MANAGER"
-                      ? "Pengelola"
-                      : "Petugas"}
-                    )
-                  </option>
-                ))}
-              </select>
-            </div>
+            <SubmitButton />
           </div>
 
-          <Feedback state={assignState} />
-
-          <Submit text="Simpan Penugasan" />
         </form>
       </section>
 
-      {/* REGISTRASI ADMIN */}
-      <section className="rounded-xl border border-[#C8D0E5] bg-white p-5">
-        <div className="mb-5 flex items-center gap-2 border-b border-slate-200 pb-4">
-          <ShieldCheck
-            size={19}
-            className="text-blue-600"
-          />
-          <h2 className="font-semibold text-slate-900">
-            Daftarkan Admin Baru
-          </h2>
-        </div>
+      {/* FOOTER INFORMATION */}
 
-        <form action={adminAction} className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label className="mb-1.5 block text-xs font-medium">
-                Nama Admin
-              </label>
-              <input
-                name="adminName"
-                required
-                minLength={2}
-                autoComplete="off"
-                className={inputClass}
-              />
-            </div>
+      <div
+        className="
+          flex items-start gap-2.5
+          rounded-lg border border-blue-100
+          bg-blue-50 p-4
+        "
+      >
+        <CircleCheck
+          size={18}
+          className="mt-0.5 shrink-0 text-blue-600"
+        />
 
-            <div>
-              <label className="mb-1.5 block text-xs font-medium">
-                Email Admin
-              </label>
-              <input
-                name="adminEmail"
-                type="email"
-                required
-                autoComplete="off"
-                className={inputClass}
-              />
-            </div>
-
-            <div className="sm:col-span-2">
-              <label className="mb-1.5 block text-xs font-medium">
-                Password Awal
-              </label>
-              <input
-                name="adminPassword"
-                type="password"
-                required
-                minLength={12}
-                autoComplete="new-password"
-                className={inputClass}
-                placeholder="Minimal 12 karakter"
-              />
-            </div>
-          </div>
-
-          <Feedback state={adminState} />
-
-          <Submit text="Daftarkan Admin" />
-        </form>
-      </section>
-
-      <div className="flex items-center gap-2 rounded-lg bg-blue-50 p-4 text-xs text-blue-800">
-        <CircleCheck size={17} />
-        Penugasan kolam disimpan pada MySQL melalui Prisma.
+        <p className="text-xs leading-relaxed text-[#334155]">
+          Data kolam disimpan secara langsung ke database
+          MySQL menggunakan Prisma. Kode kolam dibuat otomatis
+          berdasarkan ID unik database. Hanya Admin yang dapat
+          mendaftarkan kolam baru melalui halaman ini.
+        </p>
       </div>
+
     </div>
   );
 }

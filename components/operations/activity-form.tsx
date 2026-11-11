@@ -32,10 +32,10 @@ type Telemetry = {
   unit: string;
   observedAt: string | null;
   status:
-    | "NO_DATA"
-    | "NO_THRESHOLD"
-    | "WARNING"
-    | "NORMAL";
+  | "NO_DATA"
+  | "NO_THRESHOLD"
+  | "WARNING"
+  | "NORMAL";
 };
 
 type PondOption = {
@@ -193,13 +193,12 @@ function SensorCard({
       </p>
 
       <p
-        className={`mt-0.5 text-[15px] font-bold ${
-          warning
+        className={`mt-0.5 text-[15px] font-bold ${warning
             ? "text-red-600"
             : normal
               ? "text-green-700"
               : "text-slate-700"
-        }`}
+          }`}
       >
         {displayValue}
         <span className="ml-1 text-[10px] font-normal text-slate-500">
@@ -208,13 +207,12 @@ function SensorCard({
       </p>
 
       <p
-        className={`mt-1 text-[10px] ${
-          warning
+        className={`mt-1 text-[10px] ${warning
             ? "text-red-600"
             : normal
               ? "text-green-700"
               : "text-slate-500"
-        }`}
+          }`}
       >
         {displayStatus}
       </p>
@@ -229,10 +227,15 @@ export function ActivityForm({
   initialDate,
   initialTime,
 }: ActivityFormProps) {
+  const initialState: ActivityFormState = {
+    error: null,
+    success: null,
+  };
+
   const [state, action] = useActionState<
     ActivityFormState,
     FormData
-  >(saveActivityAction, { error: null });
+  >(saveActivityAction, initialState);
 
   const [pondId, setPondId] = useState(
     ponds[0]?.id ?? ""
@@ -258,7 +261,7 @@ export function ActivityForm({
 
   return (
     <div className="mx-auto w-full max-w-[1100px]">
-      {ponds.length === 0 ? (
+      {ponds.length == 0 ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-6">
           <div className="flex gap-3">
             <CircleAlert
@@ -525,13 +528,12 @@ export function ActivityForm({
                     return (
                       <label
                         key={item.value}
-                        className={`flex min-h-[49px] w-[112px] cursor-pointer items-center justify-center rounded-md border px-3 text-center text-[11px] font-medium transition ${
-                          selected
+                        className={`flex min-h-[49px] w-[112px] cursor-pointer items-center justify-center rounded-md border px-3 text-center text-[11px] font-medium transition ${selected
                             ? item.value === "PENDING"
                               ? "border-amber-500 bg-[#FFF7E8] text-amber-900"
                               : "border-blue-600 bg-blue-50 text-blue-700"
                             : "border-[#C8D0E5] bg-white text-slate-600 hover:bg-slate-50"
-                        }`}
+                          }`}
                       >
                         <input
                           type="radio"

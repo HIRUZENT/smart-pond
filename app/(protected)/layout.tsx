@@ -12,8 +12,6 @@ async function Authenticated({
 }: {
   children: ReactNode;
 }) {
-  await connection();
-
   const user = await getCurrentUser();
 
   if (!user) {
@@ -36,11 +34,15 @@ async function Authenticated({
   );
 }
 
-export default function ProtectedLayout({
+export default async function ProtectedLayout({
   children,
 }: {
   children: ReactNode;
 }) {
+  // Memastikan proses berikutnya berjalan
+  // ketika request pengguna berlangsung.
+  await connection();
+
   return (
     <Suspense fallback={<LoadingScreen />}>
       <Authenticated>{children}</Authenticated>
